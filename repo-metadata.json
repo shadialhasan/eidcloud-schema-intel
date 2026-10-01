@@ -1,0 +1,4 @@
+{
+  "description": "Database schema intelligence engine with relation inference, missing index detection, and Mermaid ER generation in pure PHP",
+  "topics": ["eidcloud", "database-schema", "schema-introspection", "er-diagram", "index-advisor", "sqlite", "php8"]
+}

@@ -1,0 +1,163 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+if (file_exists(__DIR__ . '/../vendor/autoload.php')) {
+    require_once __DIR__ . '/../vendor/autoload.php';
+} else {
+    require_once __DIR__ . '/../src/autoload.php';
+}
+
+use EidCloud\SchemaIntel\Drivers\MysqlDriver;
+use EidCloud\SchemaIntel\Drivers\SqliteDriver;
+use EidCloud\SchemaIntel\SchemaInspector;
+
+function printUsage(): void
+{
+    echo <<<HELP
+🗄️ eidcloud-schema - Database Schema Intelligence Engine (pure PHP)
+
+Usage:
+  php bin/eidcloud-schema <command> [options]
+
+Commands:
+  inspect           Inspect database schema, infer relations & detect missing indexes
+  mermaid           Generate Mermaid ER diagram (erDiagram)
+  missing-indexes   Scan for missing indexes on foreign keys & frequent query fields
+  dictionary        Generate comprehensive Markdown data dictionary
+
+Database Connection Options:
+  --sqlite=<path>   Path to SQLite database file (e.g. app.sqlite or :memory:)
+  --mysql-host=<h>  MySQL / MariaDB host (default: 127.0.0.1)
+  --mysql-port=<p>  MySQL port (default: 3306)
+  --mysql-db=<name> MySQL database name
+  --mysql-user=<u>  MySQL username (default: root)
+  --mysql-pass=<p>  MySQL password
+
+Output Options:
+  --out=<file>      Write output to specified file path instead of stdout
+  --no-inferred     Exclude inferred relations in Mermaid ER diagrams
+  -h, --help        Show this help message and exit
+
+Examples:
+  php bin/eidcloud-schema inspect --sqlite=app.sqlite --out=schema.json
+  php bin/eidcloud-schema mermaid --sqlite=app.sqlite
+  php bin/eidcloud-schema missing-indexes --sqlite=app.sqlite
+  php bin/eidcloud-schema dictionary --sqlite=app.sqlite --out=DICTIONARY.md
+  php bin/eidcloud-schema inspect --mysql-db=my_app --mysql-user=root --mysql-pass=secret
+
+HELP;
+}
+
+$argvCopy = $argv;
+array_shift($argvCopy); // remove script name
+
+if (empty($argvCopy) || in_array('-h', $argvCopy, true) || in_array('--help', $argvCopy, true)) {
+    printUsage();
+    exit(0);
+}
+
+$command = null;
+$options = [];
+
+foreach ($argvCopy as $arg) {
+    if (str_starts_with($arg, '--')) {
+        $eqPos = str_pos($arg, '=');
+        if ($eqPos !== false) {
+            $key = substr($arg, 2, $eqPos - 2);
+            $val = substr($arg, $eqPos + 1);
+            $options[$key] = $val;
+        } else {
+            $options[substr($arg, 2)] = true;
+        }
+    } elseif ($command === null) {
+        $command = strtolower($arg);
+    }
+}
+
+if ($command === null) {
+    printUsage();
+    exit(1);
+}
+
+// Instantiate Inspector
+try {
+    if (isset($options['sqlite'])) {
+        $inspector = SchemaInspector::fromSqlite($options['sqlite']);
+    } elseif (isset($options['mysql-db'])) {
+        $mysqlConfig = [
+            'host' => $options['mysql-host'] ?? '127.0.0.1',
+            'port' => isset($options['mysql-port']) ? (int)$options['mysql-port'] : 3306,
+            'database' => $options['mysql-db'],
+            'username' => $options['mysql-user'] ?? 'root',
+            'password' => $options['mysql-pass'] ?? '',
+        ];
+        $inspector = SchemaInspector::fromMysql($mysqlConfig);
+    } else {
+        fwrite(STDERR, "Error: Must specify either --sqlite=<file> or --mysql-db=<name>\n");
+        fwrite(STDERR, "Run 'php bin/eidcloud-schema --help' for usage details.\n");
+        exit(1);
+    }
+
+    $report = $inspector->inspect();
+    $output = '';
+
+    switch ($command) {
+        case 'inspect':
+            $output = $inspector->toJson($report);
+            break;
+
+        case 'mermaid':
+            $includeInferred = !isset($options['no-inferred']);
+            $output = $inspector->toMermaid($report, $includeInferred);
+            break;
+
+        case 'missing-indexes':
+            if (empty($report->missingIndexes)) {
+                $output = "✅ No missing indexes detected! Database schema is well-indexed.\n";
+            } else {
+                $lines = [];
+                $lines[] = sprintf("⚠️ Detected %d missing index suggestion(s):\n", count($report->missingIndexes));
+                foreach ($report->missingIndexes as $idx => $s) {
+                    $lines[] = sprintf(
+                        "[%d] Table: %s | Columns: (%s) | Severity: %s",
+                        $idx + 1,
+                        $s->table,
+                        implode(', ', $s->columns),
+                        $s->severity
+                    );
+                    $lines[] = "    Reason: " . $s->reason;
+                    $lines[] = "    SQL:    " . $s->suggestedSql;
+                    $lines[] = "";
+                }
+                $output = implode("\n", $lines);
+            }
+            break;
+
+        case 'dictionary':
+            $output = $inspector->toDataDictionary($report);
+            break;
+
+        default:
+            fwrite(STDERR, "Unknown command '{$command}'. Available commands: inspect, mermaid, missing-indexes, dictionary\n");
+            exit(1);
+    }
+
+    if (isset($options['out'])) {
+        file_put_contents($options['out'], $output);
+        echo "✅ Output successfully written to: {$options['out']}\n";
+    } else {
+        echo $output . (str_ends_with($output, "\n") ? '' : "\n");
+    }
+
+    exit(0);
+} catch (\Throwable $e) {
+    fwrite(STDERR, "Error: " . $e->getMessage() . "\n");
+    exit(1);
+}
+
+function str_pos(string $haystack, string $needle): int|false
+{
+    return strpos($haystack, $needle);
+}

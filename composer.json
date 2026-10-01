@@ -1,0 +1,26 @@
+{
+    "name": "eidcloud/schema-intel",
+    "description": "Database schema intelligence engine with relation inference, missing index detection, and Mermaid ER generation in pure PHP",
+    "type": "library",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "MHD. Shadi AL-Hasan",
+            "role": "Author & Maintainer"
+        }
+    ],
+    "require": {
+        "php": ">=8.2.0",
+        "ext-pdo": "*"
+    },
+    "autoload": {
+        "psr-4": {
+            "EidCloud\\SchemaIntel\\": "src/"
+        }
+    },
+    "bin": [
+        "bin/eidcloud-schema"
+    ],
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
